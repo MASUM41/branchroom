@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "target":"ES2022", "plugins":[], "incremental":false },
+  "include": ["app/client.tsx","app/workspace.tsx","app/api/**/*.ts","lib/**/*.ts","worker/app.ts","assets.d.ts","cloudflare-env.d.ts"],
+  "exclude": ["node_modules","examples","app/chatgpt-auth.ts"]
+}
