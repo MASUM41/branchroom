@@ -29,8 +29,13 @@ drafts/scroll positions, and "understood" flags per branch.
 
 A benchmark harness (`scripts/context-experiment.mjs`, run
 `npm run experiment:context`) measured **~93.5% input-token reduction** vs
-full-history prompting (6,729 → 435 tokens, character-estimated, dry-run; needs a
-live-model validation run). Context cost stays O(depth), not O(tree).
+full-history prompting in dry-run (6,729 → 435 tokens, character-estimated).
+Validated on the live model (2026-09-23, two runs, API-reported exact usage):
+**90.5% / 90.8%** (hierarchical / hierarchical+understood, 5,167 → 491 / 476
+tokens) with answer-quality parity confirmed by manual scoring
+(`outputs/context-experiment.md`). Latency is decode-bound, so input savings
+appear in cost/prefill rather than wall-clock time. Context cost stays O(depth),
+not O(tree).
 
 ## 3. The 5-Ways mental model (how we think about LLM context)
 

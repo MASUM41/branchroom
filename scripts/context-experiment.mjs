@@ -45,10 +45,18 @@ const full=[{role:'system',content:`${learningInstructions} Current main learnin
 
 async function callKimi(name,messages,token,model){
   const started=performance.now();
-  const response=await fetch(chatUrl,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({model,messages,stream:false,max_tokens:500,temperature:0}),redirect:'error',signal:AbortSignal.timeout(180000)});
+  const response=await fetch(chatUrl,{method:'POST',headers:{Authorization:`Bearer ${token}`,'Content-Type':'application/json'},body:JSON.stringify({model,messages,stream:false,max_tokens:2048,temperature:0}),redirect:'error',signal:AbortSignal.timeout(180000)});
   const raw=await response.text();if(!response.ok)throw new Error(`${name} returned HTTP ${response.status}: ${raw.slice(0,300)}`);
-  const data=JSON.parse(raw);const usage=data.usage||{};
-  return{name,answer:data.choices?.[0]?.message?.content||'',inputTokens:usage.prompt_tokens??usage.input_tokens??estimatedTokens(messages),outputTokens:usage.completion_tokens??usage.output_tokens??null,exactInputTokens:usage.prompt_tokens!=null||usage.input_tokens!=null,latencyMs:Math.round(performance.now()-started)};
+  const data=JSON.parse(raw);const usage=data.usage||{};const choice=data.choices?.[0]||{};const message=choice.message||{};
+  return{name,answer:message.content||'',reasoning:message.reasoning_content||'',finishReason:choice.finish_reason||null,inputTokens:usage.prompt_tokens??usage.input_tokens??estimatedTokens(messages),outputTokens:usage.completion_tokens??usage.output_tokens??null,exactInputTokens:usage.prompt_tokens!=null||usage.input_tokens!=null,latencyMs:Math.round(performance.now()-started)};
+}
+
+function answerSection(result){
+  if(result.answer.trim())return result.answer;
+  let text=`_No visible answer returned (finish_reason: ${result.finishReason??'unknown'}).`;
+  if(result.reasoning)text+=` The output-token budget was consumed by reasoning before any visible text was written — increase max_tokens._\n\n<details><summary>Reasoning trace</summary>\n\n${result.reasoning}\n\n</details>`;
+  else text+='_';
+  return text;
 }
 
 let model=defaultModel;let results=[];
@@ -58,8 +66,9 @@ if(!dryRun){
   const strategies=[['Full history',full],['Hierarchical',hierarchical],['Hierarchical + understood',compressed]].sort(()=>Math.random()-.5);
   for(const [name,messages] of strategies){console.log(`Running ${name}…`);results.push(await callKimi(name,messages,token,model));}
 }else{
-  results=[{name:'Full history',answer:'Dry run: no API request made.',inputTokens:estimatedTokens(full),outputTokens:null,exactInputTokens:false,latencyMs:null},{name:'Hierarchical',answer:'Dry run: no API request made.',inputTokens:estimatedTokens(hierarchical),outputTokens:null,exactInputTokens:false,latencyMs:null},{name:'Hierarchical + understood',answer:'Dry run: no API request made.',inputTokens:estimatedTokens(compressed),outputTokens:null,exactInputTokens:false,latencyMs:null}];
+  results=[{name:'Full history',answer:'Dry run: no API request made.',reasoning:'',finishReason:null,inputTokens:estimatedTokens(full),outputTokens:null,exactInputTokens:false,latencyMs:null},{name:'Hierarchical',answer:'Dry run: no API request made.',reasoning:'',finishReason:null,inputTokens:estimatedTokens(hierarchical),outputTokens:null,exactInputTokens:false,latencyMs:null},{name:'Hierarchical + understood',answer:'Dry run: no API request made.',reasoning:'',finishReason:null,inputTokens:estimatedTokens(compressed),outputTokens:null,exactInputTokens:false,latencyMs:null}];
 }
 results.sort((a,b)=>a.name.localeCompare(b.name));const fullResult=results.find(result=>result.name==='Full history');const hierarchicalResult=results.find(result=>result.name==='Hierarchical');const compressedResult=results.find(result=>result.name==='Hierarchical + understood');const saving=((fullResult.inputTokens-hierarchicalResult.inputTokens)/fullResult.inputTokens*100).toFixed(1);const compressedSaving=((fullResult.inputTokens-compressedResult.inputTokens)/fullResult.inputTokens*100).toFixed(1);
-const report=`# Branchroom context experiment\n\n- Date: ${new Date().toISOString()}\n- Model: ${model}\n- Question: ${question}\n- Token source: ${results.every(result=>result.exactInputTokens)?'API-reported exact usage':'character-based estimate (approximately 4 characters per token)'}\n\n| Strategy | Input tokens | Output tokens | Latency |\n|---|---:|---:|---:|\n${results.map(result=>`| ${result.name} | ${result.inputTokens} | ${result.outputTokens??'n/a'} | ${result.latencyMs==null?'n/a':result.latencyMs+' ms'} |`).join('\n')}\n\n**Hierarchical input-token saving: ${saving}%**\n\n**Hierarchical + understood input-token saving: ${compressedSaving}%** (understanding-aware compression active)\n\n## Full-history answer\n\n${fullResult.answer}\n\n## Hierarchical answer\n\n${hierarchicalResult.answer}\n\n## Hierarchical + understood answer\n\n${compressedResult.answer}\n\n## Manual quality check\n\nScore each answer from 1–5 for correctness, relevance, completeness, and clarity. The hierarchical method succeeds when it materially reduces input tokens without a meaningful quality loss.\n`;
-await fs.mkdir('outputs',{recursive:true});await fs.writeFile('outputs/context-experiment.md',report);console.log(`\n${report}`);console.log('Saved: outputs/context-experiment.md');
+const report=`# Branchroom context experiment\n\n- Date: ${new Date().toISOString()}\n- Model: ${model}\n- Question: ${question}\n- Token source: ${results.every(result=>result.exactInputTokens)?'API-reported exact usage':'character-based estimate (approximately 4 characters per token)'}\n\n| Strategy | Input tokens | Output tokens | Latency | Finish |\n|---|---:|---:|---:|---|\n${results.map(result=>`| ${result.name} | ${result.inputTokens} | ${result.outputTokens??'n/a'} | ${result.latencyMs==null?'n/a':result.latencyMs+' ms'} | ${result.finishReason??'n/a'} |`).join('\n')}\n\n**Hierarchical input-token saving: ${saving}%**\n\n**Hierarchical + understood input-token saving: ${compressedSaving}%** (understanding-aware compression active)\n\n## Full-history answer\n\n${answerSection(fullResult)}\n\n## Hierarchical answer\n\n${answerSection(hierarchicalResult)}\n\n## Hierarchical + understood answer\n\n${answerSection(compressedResult)}\n\n## Manual quality check\n\nScore each answer from 1–5 for correctness, relevance, completeness, and clarity. The hierarchical method succeeds when it materially reduces input tokens without a meaningful quality loss.\n`;
+const outFile=dryRun?'outputs/context-experiment-dry-run.md':'outputs/context-experiment.md';
+await fs.mkdir('outputs',{recursive:true});await fs.writeFile(outFile,report);console.log(`\n${report}`);console.log(`Saved: ${outFile}`);
